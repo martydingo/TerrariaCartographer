@@ -42,8 +42,11 @@ class TerrariaCartographer:
             input_image=self.terraGPSInputImage,
             output_image=self.terraGPSOutputImage,
         )
-
-        asyncio.run(self.run())
+        if os.path.exists(self.terraMapperWorldPath):
+            asyncio.run(self.run())
+        else:
+            print("World file not found. Exiting.")
+            exit(1)
 
     async def run(self):
         try:
