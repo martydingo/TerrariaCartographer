@@ -1,0 +1,6 @@
+__pycache__
+venv
+*.wld
+*.png
+*.pyc
+test.py
