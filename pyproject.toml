@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "TerrariaCartographer"
-version = "0.1.2"
+version = "0.2.0"
 description = "A tool that reads Terraria world files, and polls tShock APIs, to produce a 'live' world map complete with player locations."
 authors = ["Martin George <marty@dii.ngo>"]
 license = "MIT"
@@ -13,6 +13,7 @@ packages = [
 python = "^3.9"
 terramapper = {git = "https://github.com/martydingo/TerraMapper"}
 terragps = {git = "https://github.com/martydingo/TerraGPS"}
+tornado = "^6.2"
 
 
 [tool.poetry.group.dev.dependencies]
