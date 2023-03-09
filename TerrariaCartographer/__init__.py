@@ -1,8 +1,22 @@
+__all__ = ["TerrariaCartographer"]
+
 from TerraGPS import TerraGPS
-import asyncio, argparse, os, concurrent.futures, logging, logging.handlers, TerraMapper, os
+import asyncio, os, concurrent.futures, logging, logging.handlers, TerraMapper, os, time, tornado.web, shutil
 
 
 class TerrariaCartographer:
+    class MainHandler(tornado.web.RequestHandler):
+        servedTerraGPSOutputImage = ""
+
+        def get(self):
+            self.set_header("Content-type", "image/png")
+            self.set_header(
+                "Content-length", os.path.getsize(self.servedTerraGPSOutputImage)
+            )
+            with open(self.servedTerraGPSOutputImage, "rb") as f:
+                self.write(f.read())
+            self.finish()
+
     def __init__(
         self,
         worldPath,
@@ -17,25 +31,18 @@ class TerrariaCartographer:
         # Define the world path
         self.terraMapperWorldPath = worldPath
 
-        # Define the name of the world.
+        # Define the path to the world file
         self.worldFileName = worldPath.split("/")[-1]
         if not self.worldFileName.split(".")[1] == "wld":
             self.log.error("World file not a valid world file. Exiting.")
             exit(1)
 
+        # Define the name of the world.
         self.worldName = self.worldFileName.split(".")[0]
-
-        # Define the token to use when fetching player positions from the tShock API
-        self.tshockToken = tshockToken
-
-        # Define the host to use when fetching player positions from the tShock API
-        self.tshockHost = tshockHost
 
         # Define the output file path
         if outputFile is None:
-            self.outputFile = (
-                f"/root/TerrariaCartographer/TerrariaCartographer/{self.worldName}.png"
-            )
+            self.outputFile = f"{self.worldName}.png"
         else:
             # If the output file is defined, use it.
             self.outputFile = outputFile
@@ -44,16 +51,22 @@ class TerrariaCartographer:
         self.initTerraMapperConfig()
 
         # Define the TerraGPS configuration
-        self.initTerraGPSConfig()
+        self.tshockHost = tshockHost
+        self.tshockPort = tshockPort
+        self.terraGPSTshockToken = tshockToken
+        self.terraGPSInputImage = self.terraMapperOutputImage
+        self.terraGPSOutputImage = self.outputFile
 
         # Define the TerraMapper instance
         self.TerraGPS = TerraGPS(
-            tshock_host=self.tshockHost,
             tshock_token=self.terraGPSTshockToken,
+            tshock_host=self.tshockHost,
+            tshock_port=self.tshockPort,
             input_image=self.terraGPSInputImage,
             output_image=self.terraGPSOutputImage,
         )
-
+        # Define the webserver as not started
+        self.webserverStarted = False
         # If the world exists..
         if os.path.exists(self.terraMapperWorldPath):
             # Run the program
@@ -91,7 +104,7 @@ class TerrariaCartographer:
         self.log.debug("Logging Initialized")
 
     def initTerraMapperConfig(self) -> None:
-        self.terraMapperOutputImage = f"/root/TerrariaCartographer/TerrariaCartographer/{self.worldName}_working.png"
+        self.terraMapperOutputImage = f"{self.worldName}_working.png"
         self.TerraMapperConfig = {
             "draw": {
                 "background": True,
@@ -112,27 +125,69 @@ class TerrariaCartographer:
             "deep_zoom": {"enabled": False},
         }
 
-    def initTerraGPSConfig(self) -> None:
-        self.terraGPSTshockToken = self.tshockToken
-        self.terraGPSInputImage = self.terraMapperOutputImage
-        self.terraGPSOutputImage = self.outputFile
-
     def generateWorldMap(self) -> None:
-        while True:
-            self.log.info("Checking if world map needs to be generated...")
-            if os.path.exists(self.terraGPSInputImage):
-                if os.path.getmtime(self.terraMapperWorldPath) > os.path.getmtime(
-                    self.terraGPSInputImage
-                ):
+        try:
+            while True:
+                if os.path.exists(self.terraGPSInputImage):
+                    if os.path.getmtime(self.terraMapperWorldPath) > os.path.getmtime(
+                        self.terraGPSInputImage
+                    ):
+                        self.log.warning(
+                            "Newer world file detected, regenerating world map..."
+                        )
+                        TerraMapper.TerraMapper(config=self.TerraMapperConfig)
+                else:
+                    self.log.warning(
+                        "No world map detected, generating a new world map..."
+                    )
                     TerraMapper.TerraMapper(config=self.TerraMapperConfig)
-            else:
-                TerraMapper.TerraMapper(config=self.TerraMapperConfig)
+        except Exception as errorMsg:
+            self.log.error(
+                f"Exception encountered while generating the world map: {errorMsg}"
+            )
+            self.log.warning("Retrying after three seconds...")
+            time.sleep(3)
+            self.generateWorldMap()
 
     def generatePlayerMap(self) -> None:
-        while True:
-            self.log.info("Checking if player map needs to be generated...")
-            if os.path.exists(self.terraGPSInputImage):
-                self.TerraGPS.generateMap()
+        try:
+            while True:
+                if os.path.exists(self.terraGPSInputImage):
+                    if os.path.exists(self.terraGPSOutputImage):
+                        shutil.copy2(
+                            self.terraGPSOutputImage,
+                            self.terraGPSOutputImage.replace(".png", "_served.png"),
+                        )
+
+                    self.TerraGPS.generateMap()
+                    time.sleep(3)
+                else:
+                    self.log.warning(
+                        "No world map detected, waiting for a world map to be generated..."
+                    )
+                    time.sleep(3)
+        except Exception as errorMsg:
+            self.log.error(
+                f"Exception encountered while generating the player map: {errorMsg}"
+            )
+            self.log.warning("Retrying...")
+            self.generatePlayerMap()
+
+    async def startWebserver(self):
+        app = self.make_app()
+        app.listen(8888)
+        await asyncio.Event().wait()
+        self.webserverStarted = True
+
+    def make_app(self):
+        self.MainHandler.servedTerraGPSOutputImage = self.terraGPSOutputImage.replace(
+            ".png", "_served.png"
+        )
+        return tornado.web.Application(
+            [
+                (r"/", self.MainHandler),
+            ]
+        )
 
     async def run(self):
         try:
@@ -140,41 +195,8 @@ class TerrariaCartographer:
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 loop.run_in_executor(pool, self.generatePlayerMap)
                 loop.run_in_executor(pool, self.generateWorldMap)
+                await self.startWebserver()
+
         except KeyboardInterrupt:
             self.log.warning("Keyboard interrupt detected. Exiting.")
             exit(0)
-
-
-if __name__ == "__main__":
-    preArgs = argparse.ArgumentParser(
-        prog="TerrariaCartographer",
-        description="A simple class to get the position of a player in Terraria via the Terraria API and paint it onto the world image",
-    )
-    preArgs.add_argument(
-        "-f",
-        "--worldFile",
-        help="The path of the world to generate a map for",
-    )
-    preArgs.add_argument(
-        "-H",
-        "--host",
-        help="The host of the Terraria server",
-    )
-    preArgs.add_argument(
-        "-t",
-        "--token",
-        help="The token of the Terraria server",
-    )
-    preArgs.add_argument(
-        "-o",
-        "--output",
-        help="The path where the output image will be placed",
-    )
-
-    args = preArgs.parse_args()
-    terrariaCartographer = TerrariaCartographer(
-        worldPath=args.worldFile,
-        tshockHost=args.host,
-        tshockToken=args.token,
-        outputFile=args.output,
-    )

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "TerrariaCartographer"
-version = "0.2.0"
+version = "0.2.1"
 description = "A tool that reads Terraria world files, and polls tShock APIs, to produce a 'live' world map complete with player locations."
 authors = ["Martin George <marty@dii.ngo>"]
 license = "MIT"
